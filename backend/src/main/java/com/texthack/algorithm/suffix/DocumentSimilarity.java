@@ -57,7 +57,7 @@ public class DocumentSimilarity {
 
         int lenA = docA.length();
         int lenB = docB.length();
-        // Separators '#' and '$' (safe characters unlikely to appear or distinctive)
+        // Separators '#' and '$'
         String combined = docA + "#" + docB + "$";
         result.generalizedString = combined;
 
@@ -68,9 +68,8 @@ public class DocumentSimilarity {
         result.lcpArray = lcp;
 
         int maxLcp = 0;
-        int maxLcpIdx = -1;
-        long totalCommonCover = 0;
-        int minSignificantLength = 3; // ignore tiny 1-2 char noise
+        String bestLcs = "";
+        int minSignificantLength = 3; // ignore 1-2 char noise
 
         for (int i = 1; i < combined.length(); i++) {
             int prevSuffix = sa[i - 1];
@@ -82,51 +81,54 @@ public class DocumentSimilarity {
             boolean currInB = currSuffix > lenA && currSuffix < combined.length() - 1;
 
             // One suffix in Doc A and one suffix in Doc B
-            if ((prevInA && currInB) || (currInB && prevInA)) {
+            if ((prevInA && currInB) || (currInA && prevInB)) {
                 int matchLen = lcp[i];
                 if (matchLen > 0) {
+                    String sub = combined.substring(currSuffix, currSuffix + matchLen);
+
                     if (matchLen > maxLcp) {
                         maxLcp = matchLen;
-                        maxLcpIdx = Math.min(prevSuffix, currSuffix);
+                        bestLcs = sub;
                     }
 
                     if (matchLen >= minSignificantLength) {
                         int posA = prevInA ? prevSuffix : currSuffix;
                         int posB = prevInB ? (prevSuffix - lenA - 1) : (currSuffix - lenA - 1);
-                        String sub = combined.substring(sa[i], sa[i] + matchLen);
-                        
-                        // Avoid storing excessive duplicate entries
-                        boolean alreadyAdded = false;
+
+                        // Avoid duplicate or substring-contained additions
+                        boolean alreadyCovered = false;
                         for (int k = 0; k < result.commonSubstrings.size(); k++) {
-                            if (result.commonSubstrings.get(k).substring.equals(sub)) {
-                                alreadyAdded = true;
+                            String existing = result.commonSubstrings.get(k).substring;
+                            if (existing.contains(sub)) {
+                                alreadyCovered = true;
                                 break;
                             }
                         }
-                        if (!alreadyAdded && result.commonSubstrings.size() < 15) {
+
+                        if (!alreadyCovered && result.commonSubstrings.size() < 12) {
                             result.commonSubstrings.add(new CommonSubstring(sub, matchLen, posA, posB));
-                            totalCommonCover += matchLen;
                         }
                     }
                 }
             }
         }
 
-        if (maxLcpIdx != -1 && maxLcp > 0) {
-            result.longestCommonSubstringLength = maxLcp;
-            result.longestCommonSubstring = combined.substring(maxLcpIdx, maxLcpIdx + maxLcp);
-        } else {
-            result.longestCommonSubstring = "";
-            result.longestCommonSubstringLength = 0;
+        result.longestCommonSubstring = bestLcs;
+        result.longestCommonSubstringLength = maxLcp;
+
+        // Calculate total shared text length from significant non-duplicate substrings
+        long totalSharedCover = 0;
+        for (int k = 0; k < result.commonSubstrings.size(); k++) {
+            totalSharedCover += result.commonSubstrings.get(k).length;
         }
 
         // Academic similarity metric:
-        // Harmonic mean of shared substrings coverage + LCS ratio
-        double lcsRatio = (2.0 * maxLcp) / (lenA + lenB);
-        double coverRatio = (2.0 * totalCommonCover) / (lenA + lenB);
-        double combinedRatio = Math.min(1.0, 0.4 * lcsRatio + 0.6 * coverRatio);
+        double harmonicDenom = (lenA + lenB) / 2.0;
+        double lcsRatio = (double) maxLcp / harmonicDenom;
+        double coverRatio = (double) totalSharedCover / harmonicDenom;
+        double combinedRatio = Math.min(1.0, 0.6 * lcsRatio + 0.4 * coverRatio);
 
-        result.similarityScore = Math.round(combinedRatio * 1000.0) / 10.0;
+        result.similarityScore = Math.min(100.0, Math.round(combinedRatio * 1000.0) / 10.0);
         result.explanation = "Derived using Generalized Suffix Array and Kasai LCP array. Evaluates Longest Common Substrings (LCS) and overlapping token coverage across documents.";
 
         return result;
